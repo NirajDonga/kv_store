@@ -184,13 +184,34 @@ int main() {
         std::string host = req.get_param_value("host");
         host = sanitize_host(host);
 
-        // Add to ring logic
+        std::string ip; int port;
+        get_ip_port(host, ip, port);
+
+        httplib::Client temp_client(ip, port);
+        temp_client.set_connection_timeout(2);
+
+        // Try to ping the new server's /status endpoint
+        auto check = temp_client.Get("/status");
+
+        if (!check || check->status != 200) {
+            // IT FAILED! Abort everything.
+            std::cout << "[Error] Refusing to add dead node: " << host << "\n";
+            res.status = 503;
+            res.set_content("Error: Target node is not reachable.", "text/plain");
+            return;
+        }
+        std::cout << "[Proxy] Health Check Passed for " << host << ". Adding to ring...\n";
+        // --------------------------------------
+
+        // --- STEP 2: UPDATE RING ---
+        // Now it is safe to add it.
         ring.addNode(host);
 
-        // Trigger data movement
+        // --- STEP 3: MIGRATE DATA ---
+        // Move keys from the old owner to this new node.
         optimized_rebalance_add(ring, host);
 
-        res.set_content("Node Added: " + host, "text/plain");
+        res.set_content("Success: Node Added " + host, "text/plain");
     });
 
     // 4. ADMIN API: REMOVE NODE

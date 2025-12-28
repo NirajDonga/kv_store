@@ -113,6 +113,11 @@ int main(int argc, char* argv[]) {
         res.set_content(ss.str(), "text/plain");
     });
 
+    // 6. Heartbeat / Status
+    svr.Get("/status", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content("OK", "text/plain");
+    });
+
     svr.Get("/all", [](const httplib::Request& req, httplib::Response& res) {
         stringstream ss;
         for (int i = 0; i < NUM_SHARDS; ++i) {
