@@ -1,0 +1,22 @@
+# Ignore build artifacts
+build/
+cmake-build-debug/
+.cache/
+
+# Ignore compiled executables (Linux/Mac)
+kv_server
+kv_client
+kv_proxy
+
+# Ignore compiled executables (Windows)
+*.exe
+*.dll
+*.lib
+
+# --- CRITICAL: Ignore WAL Data Files ---
+wal_*.log
+
+# Ignore IDE settings (Optional but recommended)
+.idea/
+.vscode/
+.DS_Store

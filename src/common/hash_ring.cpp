@@ -7,7 +7,17 @@
 ConsistentHashRing::ConsistentHashRing(int v_nodes) : virtual_nodes(v_nodes) {}
 
 size_t ConsistentHashRing::hash_key(const std::string& key) {
-    return std::hash<std::string>{}(key);
+    // FNV-1a 64-bit Hash Algorithm
+    // Deterministic: Always returns same output for same input
+    const size_t FNV_prime = 1099511628211u;
+    const size_t offset_basis = 14695981039346656037u;
+
+    size_t hash = offset_basis;
+    for (char c : key) {
+        hash ^= static_cast<size_t>(c);
+        hash *= FNV_prime;
+    }
+    return hash;
 }
 
 void ConsistentHashRing::addNode(const std::string& node_address) {
@@ -34,7 +44,6 @@ std::string ConsistentHashRing::getNode(const std::string& key) {
     return it->second;
 }
 
-// --- OPTIMIZATION LOGIC ---
 std::vector<MigrationTask> ConsistentHashRing::getRebalancingTasks(const std::string& new_node) {
     std::vector<MigrationTask> tasks;
     if (ring.empty()) return tasks;

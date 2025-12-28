@@ -1,39 +1,112 @@
+# Distributed Key-Value Store (Persistent & Proxy-Based)
 
-Markdown
+This is a C++ project demonstrating a production-ready **Distributed Key-Value Store** architecture. It implements **Consistent Hashing** for dynamic scaling, **Write-Ahead Logs (WAL)** for data persistence, and a **Proxy Gateway** pattern to decouple clients from storage logic.
 
-# Distributed Key-Value Store
+## 🚀 Key Features
 
-This is a C++ project demonstrating **Consistent Hashing** with automatic data migration and dynamic scaling.
+* **Consistent Hashing:** Distributes data across nodes with minimal movement during scaling.
+* **Persistence (WAL):** Implementation of a Write-Ahead Log to ensure data survives server restarts.
+* **Proxy Architecture:** A "Smart Gateway" handles all routing and rebalancing, allowing for "Thin Clients".
+* **Dynamic Scaling:** Add or remove nodes on the fly with automatic data migration.
+* **Internal Sharding:** High-concurrency local storage using mutex-protected shards.
 
-## Getting Started
+## 🛠️ Architecture
 
-First, build the project using CMake:
+1.  **Client (`kv_client`):** A dumb terminal. Connects *only* to the Proxy.
+2.  **Proxy (`kv_proxy`):** The brain. Holds the Hash Ring, routes requests, and manages data migration.
+3.  **Server (`kv_server`):** The storage. Saves data to memory and appends to a disk log (`wal_PORT.log`).
 
+## 📦 Getting Started
+
+### 1. Build the Project
 ```bash
 mkdir build && cd build
 cmake ..
 cmake --build .
-Next, start your servers (in separate terminals):
+2. Start the Cluster
+You will need 4 separate terminals to simulate the cluster on one machine.
+
+Terminal 1: Storage Node A (Port 8081)
 
 Bash
 
-# Terminal 1
-./kv_server 8080
-
-# Terminal 2
 ./kv_server 8081
-Finally, run the client application:
+# Output: --- Persistent Server Port 8081 (WAL: wal_8081.log) ---
+Terminal 2: Storage Node B (Port 8082)
+
+Bash
+
+./kv_server 8082
+# Output: --- Persistent Server Port 8082 (WAL: wal_8082.log) ---
+Terminal 3: The Proxy (Port 8000)
+
+Bash
+
+./kv_proxy
+# Output: --- KV Proxy/Gateway running on Port 8000 ---
+Terminal 4: The Client
 
 Bash
 
 ./kv_client
-Usage
-Once the client is running, you can interact with the cluster:
+# Output: --- Thin KV Client (Connected to Proxy:8000) ---
+🎮 Usage
+Once the client is running, you can interact with the system. The commands are sent to the Proxy, which handles the rest.
 
-ADD 127.0.0.1:8081 - Add a server and trigger optimized rebalancing.
+1. Initialize the Cluster
+Tell the proxy about your storage nodes.
 
-REMOVE 127.0.0.1:8080 - Remove a server and evacuate data.
+Plaintext
 
-SET <key> <val> - Store a value.
+> ADD 127.0.0.1:8081
+[Proxy] Node Added: 127.0.0.1:8081
 
-GET <key> - Retrieve a value.
+> ADD 127.0.0.1:8082
+[Proxy] Node Added: 127.0.0.1:8082
+2. Store & Retrieve Data
+Plaintext
+
+> SET user1 Alice
+OK
+
+> GET user1
+Value: Alice
+The Proxy automatically hashed user1 and routed it to either 8081 or 8082.
+
+3. Verify Persistence (The "Kill Test")
+Stop the server holding your data (Ctrl+C in Terminal 1 or 2).
+
+Restart that server (./kv_server 8081).
+
+Get the key again in the client.
+
+Plaintext
+
+> GET user1
+Value: Alice
+It works! The server replayed wal_8081.log on startup.
+
+4. Dynamic Scaling (Rebalancing)
+Add a new node and watch data move automatically.
+
+Plaintext
+
+> ADD 127.0.0.1:8083
+[Proxy] Rebalancing for new node...
+[Proxy] Rebalancing Complete.
+5. Remove a Node (Evacuation)
+Safely remove a node; the proxy will move its data to others before it disconnects.
+
+Plaintext
+
+> REMOVE 127.0.0.1:8081
+[Proxy] Evacuating node...
+[Proxy] Node Removed.
+📁 Project Structure
+src/proxy/: Contains the Coordinator logic (Hash Ring & Migration).
+
+src/server/: Contains the Storage engine (In-Memory Map + WAL).
+
+src/client/: Contains the UI logic.
+
+src/common/: Shared Hash Ring algorithms.

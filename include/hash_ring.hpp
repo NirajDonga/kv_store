@@ -22,6 +22,6 @@ public:
     void removeNode(const std::string& node_address);
     std::string getNode(const std::string& key);
 
-    // --- NEW: Calculate exactly what data needs to move ---
+    // Calculate exactly what data needs to move
     std::vector<MigrationTask> getRebalancingTasks(const std::string& new_node);
 };
