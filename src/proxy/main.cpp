@@ -24,7 +24,7 @@ bool get_ip_port(const std::string& address, std::string& ip, int& port) {
     return true;
 }
 
-// --- OPTIMIZED ADD MIGRATION (Executed by Proxy) ---
+// --- ADD MIGRATION (Executed by Proxy) ---
 void optimized_rebalance_add(ConsistentHashRing& ring, const std::string& new_node) {
     std::cout << "[Proxy] Rebalancing for new node: " << new_node << "...\n";
     auto tasks = ring.getRebalancingTasks(new_node);
@@ -34,12 +34,14 @@ void optimized_rebalance_add(ConsistentHashRing& ring, const std::string& new_no
     httplib::Client dest_cli(new_ip, new_port);
     dest_cli.set_connection_timeout(1);
 
+    int moved_count = 0;
     for (const auto& task : tasks) {
         std::string src_ip; int src_port;
         if (!get_ip_port(task.source_node, src_ip, src_port)) continue;
         httplib::Client src_cli(src_ip, src_port);
         src_cli.set_connection_timeout(1);
 
+        // Ask source node for keys in the range
         std::string path = "/range?start=" + std::to_string(task.start_hash) +
                            "&end=" + std::to_string(task.end_hash);
         auto res = src_cli.Get(path.c_str());
@@ -55,12 +57,13 @@ void optimized_rebalance_add(ConsistentHashRing& ring, const std::string& new_no
                         // 2. Delete from OLD node
                         httplib::Params p_del; p_del.emplace("key", key);
                         src_cli.Post("/del", p_del);
+                        moved_count++;
                     }
                 }
             }
         }
     }
-    std::cout << "[Proxy] Rebalancing Complete.\n";
+    std::cout << "[Proxy] Rebalancing Complete. Moved " << moved_count << " keys.\n";
 }
 
 // --- REMOVE MIGRATION (Executed by Proxy) ---
@@ -79,6 +82,7 @@ void rebalance_remove(ConsistentHashRing& ring, const std::string& node_to_remov
     // Remove from ring immediately so new lookups don't go there
     ring.removeNode(node_to_remove);
 
+    int moved_count = 0;
     if (res && res->status == 200) {
         std::stringstream ss(res->body);
         std::string key, val;
@@ -91,14 +95,14 @@ void rebalance_remove(ConsistentHashRing& ring, const std::string& node_to_remov
                     httplib::Client dest(t_ip, t_port);
                     httplib::Params p; p.emplace("key", key); p.emplace("val", val);
                     if (dest.Post("/put", p)) {
-                        httplib::Params del_p; del_p.emplace("key", key);
-                        victim_cli.Post("/del", del_p);
+                        // We don't delete from victim because it's being removed anyway
+                        moved_count++;
                     }
                 }
             }
         }
     }
-    std::cout << "[Proxy] Evacuation Complete.\n";
+    std::cout << "[Proxy] Evacuation Complete. Moved " << moved_count << " keys.\n";
 }
 
 int main() {
@@ -122,7 +126,6 @@ int main() {
         get_ip_port(target, ip, port);
         httplib::Client cli(ip, port);
 
-        // Forward the request
         httplib::Params p;
         p.emplace("key", key);
         p.emplace("val", req.get_param_value("val"));
@@ -156,59 +159,28 @@ int main() {
         }
     });
 
-    // 2.5 DATA API: DEL (New!)
-    svr.Post("/del", [&](const httplib::Request& req, httplib::Response& res) {
-        std::string key = req.get_param_value("key");
-        std::string target = ring.getNode(key);
-
-        if (target.empty()) { res.status = 503; return; }
-
-        std::string ip; int port;
-        get_ip_port(target, ip, port);
-        httplib::Client cli(ip, port);
-
-        // Forward the delete request to the specific server
-        httplib::Params p; p.emplace("key", key);
-        auto cli_res = cli.Post("/del", p);
-
-        if(cli_res) {
-            res.status = cli_res->status;
-            res.set_content("Deleted", "text/plain");
-        } else {
-            res.status = 500;
-        }
-    });
-
     // 3. ADMIN API: ADD NODE
     svr.Post("/add_node", [&](const httplib::Request& req, httplib::Response& res) {
         std::string host = req.get_param_value("host");
         host = sanitize_host(host);
 
+        // --- HEALTH CHECK ---
         std::string ip; int port;
         get_ip_port(host, ip, port);
-
         httplib::Client temp_client(ip, port);
         temp_client.set_connection_timeout(2);
-
-        // Try to ping the new server's /status endpoint
         auto check = temp_client.Get("/status");
 
         if (!check || check->status != 200) {
-            // IT FAILED! Abort everything.
             std::cout << "[Error] Refusing to add dead node: " << host << "\n";
             res.status = 503;
             res.set_content("Error: Target node is not reachable.", "text/plain");
             return;
         }
         std::cout << "[Proxy] Health Check Passed for " << host << ". Adding to ring...\n";
-        // --------------------------------------
 
-        // --- STEP 2: UPDATE RING ---
-        // Now it is safe to add it.
+        // --- ADD & REBALANCE ---
         ring.addNode(host);
-
-        // --- STEP 3: MIGRATE DATA ---
-        // Move keys from the old owner to this new node.
         optimized_rebalance_add(ring, host);
 
         res.set_content("Success: Node Added " + host, "text/plain");
@@ -219,7 +191,6 @@ int main() {
         std::string host = req.get_param_value("host");
         host = sanitize_host(host);
 
-        // Trigger data evacuation
         rebalance_remove(ring, host);
 
         res.set_content("Node Removed: " + host, "text/plain");

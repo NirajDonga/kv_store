@@ -25,8 +25,7 @@ size_t get_shard_id(const string& key) {
     return hash<string>{}(key) % NUM_SHARDS;
 }
 
-// 2. FNV-1a Hash (MUST match the Proxy's algorithm for rebalancing)
-// *** ADD THIS FUNCTION ***
+// 2. FNV-1a Hash (CRITICAL FIX: Matches Proxy's Logic)
 size_t fnv1a_hash(const std::string& key) {
     const size_t FNV_prime = 1099511628211u;
     const size_t offset_basis = 14695981039346656037u;
@@ -41,7 +40,7 @@ size_t fnv1a_hash(const std::string& key) {
 // 3. Ring Range Check
 bool in_range(size_t h, size_t start, size_t end) {
     if (start < end) return h > start && h <= end;
-    return h > start || h <= end; // Handles Wrap-Around (e.g., 900 to 100)
+    return h > start || h <= end; // Handles Wrap-Around
 }
 
 // --- PERSISTENCE HELPERS ---
@@ -76,7 +75,7 @@ int main(int argc, char* argv[]) {
     // 1. SETUP WAL
     string wal_filename = "wal_" + to_string(port) + ".log";
     restore_from_wal(wal_filename);
-    wal_file.open(wal_filename, ios::app); // Append mode
+    wal_file.open(wal_filename, ios::app);
 
     std::cout.setf(std::ios::unitbuf);
     httplib::Server svr;
